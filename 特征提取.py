@@ -5,12 +5,14 @@ from 提取函数库 import *
 
 TEST = True
 CLEAN = False
-PROD = False
+PROD = 0
 
+if PROD:
+    TEST =False
 # 0 1 2 3
-VERBOSE  = 0
+VERBOSE = 0
 
-MAX_FILE_COUNT = 100
+MAX_FILE_COUNT = -1
 
 target_files = []
 
@@ -20,19 +22,31 @@ FOCUS_FEATURE = ["文化程度", "地区", "认罪态度良好", "前科"]
 
 FOCUS_FEATURE = ["罚金"]
 
-FOCUS_FEATURE = ["有期徒刑","拘役","管制"]
-
 FOCUS_FEATURE = ["年龄"]
+
+FOCUS_FEATURE = ["有期徒刑","拘役","管制","罚金", "盗窃数额"]
+
+FOCUS_FEATURE = ["没收个人财产", "没收个人财产数额"]
+
+version_id = "v1"
 
 if TEST:
     input_file_path = './testset_v1'
-    # target_files = ["88.txt"]
+    # target_files = ["165.txt"]
+    output_file_path = './processed'
 
 if CLEAN:
     clean_file_path = './ilegalfiles'
 
 if PROD:
-    input_file_path = './rawdata'
+    # target_files = ["重庆认罪认罚5622.txt"]
+    input_file_path = './rawdata/rawdata_v1'
+    input_file_path = "/Users/vectorshan/Desktop/清洗后数据/汇总"
+    output_file_path = './processed'
+    if version_id:
+        output_file_path += "/" + version_id
+    if not os.path.exists(output_file_path):
+        os.makedirs(output_file_path)
 
 def unify_feature_name(name):
     if name == "地点":
@@ -70,6 +84,8 @@ def unify_feature_value(name,value):
         value = ToNum(value)
     if name in ["盗窃数额","缓刑","没收个人财产数额"] and  value in ["未知", "否", "无"]:
         value = 0
+    if name in ["有期徒刑","拘役", "管制"]:
+        value = ToMonth(str(value))
     return value
 
 def readTestFile(file_path):
@@ -98,11 +114,25 @@ def readTestFile(file_path):
     return article_section, features, reasons
 
 
-def readRawFile(filepath):
+def readRawFile(file_path):
     # 读取清洗过的原始数据， 用来提取和输出特征
-    lines = []
-    return lines
+    if VERBOSE >= 0: print("Reading " + file_path)
+    article = open(file_path, 'r').read()
+    if "预期特征" in article:
+        article = re.split(r"\#\s*预期特征\s*\n",article)[0]
+    if "提取结果" in article:
+        article = re.split(r"\#\s*提取结果\s*\n",article)[0]
+    return article
 
+def ToMonth(value):
+    year,month = 0,0
+    m = re.search("([\d]+)Y",value)
+    if m:
+        year = int(m.groups()[0])
+    m = re.search("([\d]+)M",value)
+    if m:
+        month = int(m.groups()[0])
+    return year*12 + month
 
 # 地点
 
@@ -150,7 +180,7 @@ feature_fun_map ={
         "缓刑" : 提取缓刑,
         }
 
-accuracy_stats = { name: [0,0] for name in feature_fun_map.keys()}
+
 
 
 def format_function_names(keys):
@@ -159,12 +189,36 @@ def format_function_names(keys):
         print("\t\"{}\" : 提取{},".format(key,key))
     print("}")
 
-def 统计判决如下(txts):
-    rate = sum([ 1 for txt in txts if "判决如下" in txt])/len(txts)
-    print("{}% 的文章含有判决如下".format(rate*100))
+
+def exclude_file(article):
+    for word in ["共同犯罪","主犯","从犯","共犯","数罪并罚"]:
+        if word in article:
+            return True
+    return False
+
+accuracy_stats = { name: [0,0] for name in feature_fun_map.keys()}
+
+word_stats_list = ["判决如下","裁判日期", "法院认为","数罪并罚","本院认为" ]
+word_stats = {word: [0,0] for word in word_stats_list}
+
+def update_word_stats(filename,article):
+    for word in word_stats.keys():
+        word_stats[word][1]+=1
+        if word in article:
+            word_stats[word][0] +=1
+        else:
+            if VERBOSE >= 1: print("{} not in {}".format(word, filename))
+
+def report_word_stats():
+    for word, stats in word_stats.items():
+        print("{:.1f}% 文章含有 {}".format(stats[0]/stats[1]*100,word))
 
 if __name__ == "__main__":
     print("数据读取路径: ",input_file_path)
+
+    col_names = ["文件名"] + list(feature_fun_map.keys())
+    result_dict = { col:[] for col in col_names}
+
     if TEST:
         for filename in os.listdir(input_file_path)[:MAX_FILE_COUNT]:
             if target_files and filename not in target_files:
@@ -175,23 +229,34 @@ if __name__ == "__main__":
             except Exception as e:
                 print("测试集无法识别: {} {}".format(filename,e))
                 continue
-            for key, fun in feature_fun_map.items():
-                extracted_features[key] = fun(article_section)
-            # RE 调试点
-            temp = re.search(r"(\S*)[省|市].*法院.*", article_section, re.M + re.X)
+            if exclude_file(article_section):
+                print("样本被剔除")
+                continue
 
-            extracted_features_count = 39
-            # format function names
-            # format_function_names(expected_features.keys())
-            if len(expected_features) !=  extracted_features_count:
-                print("{} 特征数不符， 读取 {}， 预期 {}".format(filename,len(expected_features), extracted_features_count))
+            registered_features_count = 39
+            if len(expected_features) != registered_features_count:
+                print("{} 特征数不符， 读取 {}， 预期 {}".format(filename,len(expected_features), registered_features_count))
                 if CLEAN:
                     os.rename(os.path.join(input_file_path,filename),os.path.join(clean_file_path,filename))
 
+            # 合法样本, 开始处理
+
+            for key, fun in feature_fun_map.items():
+                extracted_features[key] = fun(article_section)
+                result_dict[key].append(extracted_features[key])
+            result_dict["文件名"].append(filename)
+            # RE 调试点
+            temp = re.search(r"(\S*)[省|市].*法院.*", article_section, re.M + re.X)
+
+            update_word_stats(filename, article_section)
+            if extracted_features["盗窃数额"]<1000:
+                print(extracted_features["盗窃数额"])
+                continue
             for name in feature_fun_map.keys():
                 if name not in extracted_features:
                     print("Feature not extracted: {}".format(name))
                     continue
+
                 accuracy_stats[name][1] += 1
                 if name not in expected_features:
                     print("Unexpected feature {} in file {}".format(name,filename))
@@ -204,12 +269,55 @@ if __name__ == "__main__":
                     accuracy_stats[name][0] += 1
                     if VERBOSE>=1: print("提取正确 {},\t     预期值 {},\t     提取值 {}".format(name, value, extracted_features[name]))
         print("\n统计分析\n")
-        统计判决如下(["判决如下", "判决如下1"])
-    print("提取准确度")
-    for name, stats in accuracy_stats.items():
-        print("{}:\t {}/{} = {:.1f}%".format(name, stats[0], stats[1], stats[0]/stats[1]*100))
+
+
+
+        print("提取准确度")
+        for name, stats in accuracy_stats.items():
+            print("{}:\t {}/{} = {:.1f}%".format(name, stats[0], stats[1], stats[0]/stats[1]*100))
     if PROD:
-        pass
+        extracted_features = {}
+        for filename in os.listdir(input_file_path)[:MAX_FILE_COUNT]:
+            if target_files and filename not in target_files:
+                continue
+            try:
+                article = readRawFile(os.path.join(input_file_path, filename))
+            except Exception as e:
+                print("文件无法读取: {} {}".format(filename, e))
+                continue
+
+            update_word_stats(filename, article)
+
+            if exclude_file(article):
+                print("样本被剔除")
+                continue
+
+
+            for key, fun in feature_fun_map.items():
+                value = fun(article)
+                if key == "认罪认罚":
+                    value = 校准认罪认罚(filename, value)
+                extracted_features[key] = value
+                result_dict[key].append(value)
+            result_dict["文件名"].append(filename)
+
+
+            OUTPUT_PROD_LOG= False
+            if OUTPUT_PROD_LOG:
+                with open(os.path.join(output_file_path,filename),'w') as file:
+                    file.write(article)
+                    file.write("\n# 提取结果\n\n")
+                    for key, value in extracted_features.items():
+                        file.write("{} | {}\n".format(key,value))
+    result_df = pd.DataFrame(data=result_dict)
+    result_df = result_df[(result_df["盗窃数额"] >= 1000) | (result_df["扒窃"] == "是") | (result_df["入户"] == "是") | (result_df["携带凶器"] == "是") | (result_df["多次盗窃"] == "是")]
+    result_df = result_df[result_df["地区"].isin({"北京","天津","河北","湖南","重庆"})]
+    result_df.reset_index(drop=True,inplace=True)
+    print(result_df)
+    result_df.to_csv(os.path.join(output_file_path,"final_dataset.csv"))
+    report_word_stats()
+
+
 
 
 
