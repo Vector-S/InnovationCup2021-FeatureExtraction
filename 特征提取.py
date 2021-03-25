@@ -5,7 +5,7 @@ from 提取函数库 import *
 
 TEST = True
 CLEAN = False
-PROD = 0
+PROD = True
 
 if PROD:
     TEST =False

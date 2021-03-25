@@ -321,12 +321,16 @@ def 提取入户(input):
     return 布尔编码(result)
 
 def 提取携带凶器(input):
+    if "本院认为" in input:
+        input = re.split("本院认为",input,1)[-1]
     result = False
     if re.search("凶器",input):
         result = True
     return 布尔编码(result)
 
 def 提取扒窃(input):
+    if "本院认为" in input:
+        input = re.split("本院认为",input,1)[-1]
     result = False
     if re.search("扒窃",input):
         result = True
@@ -367,6 +371,8 @@ def 提取多次盗窃(input):
 
 
 def 提取免于刑事处罚(input):
+    if "本院认为" in input:
+        input = re.split("本院认为",input,1)[-1]
     result = False
     if re.search("免于刑事处罚",input):
         result = True
